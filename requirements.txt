@@ -16,7 +16,6 @@ pybind11==2.11.0
 pybind11-global==2.11.0
 pygame==2.6.1
 pynput==1.8.1
-pyorbbecsdk @ file://./backend/sdk/pyorbbecsdk
 requests==2.32.4
 six==1.17.0
 urllib3==2.5.0

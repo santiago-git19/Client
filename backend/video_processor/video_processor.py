@@ -28,9 +28,10 @@ class VideoChunk:
 class VideoWriter:
     """Manejador de escritura de video para una cámara"""
     
-    def __init__(self, camera_id: int, output_path: str):
+    def __init__(self, camera_id: int, output_path: str, config=None):
         self.camera_id = camera_id
         self.output_path = output_path
+        self.config = config  # Almacenar configuración (opcional)
         self.writer: Optional[cv2.VideoWriter] = None
         self.frame_count = 0
         self.start_time: Optional[datetime] = None
