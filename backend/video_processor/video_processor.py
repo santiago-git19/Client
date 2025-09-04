@@ -279,7 +279,7 @@ class VideoProcessor:
             self.recording_active = True
             
             # Iniciar grabación en cámaras
-            if not camera_manager.start_recording_all(self.session_id, self.patient_id):
+            if not camera_manager.start_recording_all():
                 self.recording_active = False
                 return False
             

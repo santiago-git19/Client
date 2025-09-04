@@ -9,6 +9,8 @@ from dataclasses import dataclass
 # Importación del SDK de Orbbec
 try:
     from pyorbbecsdk import *
+    from pyorbbecsdk import Pipeline, Device, Config, Context, FrameSet
+    from pyorbbecsdk import OBSensorType, OBFormat
     ORBBEC_AVAILABLE = True
 except ImportError:
     raise ImportError(
@@ -64,6 +66,19 @@ class OrbbecCamera:
                       f"{self.color_profile.get_width()}x{self.color_profile.get_height()}@{self.color_profile.get_fps()}fps")
             
             ob_config.enable_stream(self.color_profile)
+            
+            # Habilitar sensor de profundidad si está disponible
+            try:
+                depth_profile_list = self.pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
+                if depth_profile_list.get_count() > 0:
+                    depth_profile = depth_profile_list.get_default_video_stream_profile()
+                    ob_config.enable_stream(depth_profile)
+                    print(f"Cámara {self.camera_id}: Sensor de profundidad habilitado")
+                else:
+                    print(f"Cámara {self.camera_id}: Sensor de profundidad no disponible")
+            except Exception as e:
+                print(f"Cámara {self.camera_id}: Error habilitando sensor de profundidad: {e}")
+            
             self.pipeline.start(ob_config)
             
             print(f"Cámara {self.camera_id} inicializada correctamente")
@@ -256,6 +271,44 @@ class CameraManager:
             return None
 
         return self.cameras[camera_id].get_frame()
+    
+    def get_depth_frame(self, camera_id: int) -> Optional[np.ndarray]:
+        """Obtener frame de profundidad de una cámara específica"""
+        if camera_id not in self.cameras:
+            print(f"Cámara {camera_id} no encontrada")
+            return None
+
+        camera = self.cameras[camera_id]
+        if not camera.pipeline:
+            print(f"Cámara {camera_id}: Pipeline no inicializado")
+            return None
+            
+        try:
+            # Obtener frames con timeout
+            frames = camera.pipeline.wait_for_frames(1000)
+            if not frames:
+                print(f"Cámara {camera_id}: No se pudieron obtener frames")
+                return None
+                
+            # Obtener frame de profundidad
+            depth_frame = frames.get_depth_frame()
+            if not depth_frame:
+                print(f"Cámara {camera_id}: No se pudo obtener depth frame")
+                return None
+            
+            # Convertir a numpy array
+            width = depth_frame.get_width()
+            height = depth_frame.get_height()
+            depth_data = np.asanyarray(depth_frame.get_data())
+            
+            # Reshape a formato de imagen (height, width)
+            depth_image = depth_data.reshape((height, width))
+            
+            return depth_image
+            
+        except Exception as e:
+            print(f"Error obteniendo depth frame de cámara {camera_id}: {e}")
+            return None
 
     def start_recording_all(self) -> bool:
         """Iniciar modo de grabación en todas las cámaras"""
