@@ -44,7 +44,7 @@ def create_app() -> Flask:
                 'file_color': open(chunk.color_file_path, 'rb'),
                 'file_depth': open(chunk.depth_file_path, 'rb')
             }
-            
+            print(chunk.color_file_path, chunk.depth_file_path)
             data = {
                 'chunk_id': chunk.chunk_id,
                 'camera_id': chunk.camera_id,
