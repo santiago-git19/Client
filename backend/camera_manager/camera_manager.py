@@ -301,6 +301,8 @@ class CameraManager:
             height = depth_frame.get_height()
             depth_data = np.asanyarray(depth_frame.get_data())
             
+            print(f"Debug - Cámara {camera_id}: Depth frame - width={width}, height={height}, data_size={len(depth_data)}")
+            
             # Reshape a formato de imagen (height, width)
             depth_image = depth_data.reshape((height, width))
             
