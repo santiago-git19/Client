@@ -303,6 +303,14 @@ class CameraManager:
             
             print(f"Debug - Cámara {camera_id}: Depth frame - width={width}, height={height}, data_size={len(depth_data)}")
             
+            # Los datos de profundidad suelen ser de 16 bits (2 bytes por píxel)
+            # Verificar si necesitamos reinterpretar los datos
+            expected_size = width * height
+            if len(depth_data) == expected_size * 2:
+                # Datos de 16 bits, convertir a uint16
+                depth_data = depth_data.view(np.uint16)
+                print(f"Debug - Cámara {camera_id}: Converted to uint16, new size={len(depth_data)}")
+            
             # Reshape a formato de imagen (height, width)
             depth_image = depth_data.reshape((height, width))
             
