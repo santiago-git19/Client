@@ -2,7 +2,6 @@
 # Emplea el SDK de Orbbec, si se emplean cámaras de otra marca, se debe implementar un gestor específico para estas
 import cv2
 import numpy as np
-import time
 from datetime import datetime
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -10,8 +9,6 @@ from dataclasses import dataclass
 # Importación del SDK de Orbbec
 try:
     from pyorbbecsdk import *
-    # Importaciones específicas para claridad
-    from pyorbbecsdk import Context, OBFormat, Pipeline, Config, OBSensorType
     ORBBEC_AVAILABLE = True
 except ImportError:
     raise ImportError(
@@ -98,110 +95,22 @@ class OrbbecCamera:
             width = frame.get_width()
             height = frame.get_height()
             color_format = frame.get_format()
-            
-            # Obtener los datos como un array de bytes
-            data = np.asanyarray(frame.get_data(), dtype=np.uint8)
-            
-            # Debug inicial solo para primera conversión por cámara
-            if not hasattr(self, '_debug_logged'):
-                print(f"Cámara {self.camera_id}: Conversión - {width}x{height}, fmt={color_format}, data={data.shape}, min={data.min()}, max={data.max()}, mean={data.mean():.1f}")
-                self._debug_logged = True
+            data = np.asanyarray(frame.get_data())
             
             if color_format == OBFormat.RGB:
-                expected_size = height * width * 3
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error RGB - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                image = data.reshape((height, width, 3))
+                print("------------------------------------------------------------------------------")
+                image = np.reshape(data, (height, width, 3))
                 image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                
             elif color_format == OBFormat.BGR:
-                expected_size = height * width * 3
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error BGR - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                image = data.reshape((height, width, 3))
-                
-            elif color_format == OBFormat.YUYV:
-                expected_size = height * width * 2
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error YUYV - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                # YUYV: Y0 U0 Y1 V0 (4 bytes para 2 píxeles)
-                # Reshape como array 2D para OpenCV
-                yuyv_2d = data.reshape((height, width * 2))
-                # Intentar diferentes variantes de conversión YUYV
-                try:
-                    image = cv2.cvtColor(yuyv_2d, cv2.COLOR_YUV2BGR_YUY2)
-                except:
-                    try:
-                        image = cv2.cvtColor(yuyv_2d, cv2.COLOR_YUV2BGR_YUYV)
-                    except:
-                        # Conversión manual como último recurso
-                        print(f"Cámara {self.camera_id}: Usando conversión manual YUYV")
-                        y = data[0::2]  # Componente Y (luminancia)
-                        u = data[1::4]  # Componente U
-                        v = data[3::4]  # Componente V
-                        # Expandir U y V para cada píxel
-                        u_expanded = np.repeat(u, 2)
-                        v_expanded = np.repeat(v, 2)
-                        # Crear imagen YUV planar
-                        yuv = np.zeros((height * width * 3,), dtype=np.uint8)
-                        yuv[0::3] = y
-                        yuv[1::3] = u_expanded[:len(y)]
-                        yuv[2::3] = v_expanded[:len(y)]
-                        yuv_image = yuv.reshape((height, width, 3))
-                        image = cv2.cvtColor(yuv_image, cv2.COLOR_YUV2BGR)
-                
-            elif color_format == OBFormat.UYVY:
-                expected_size = height * width * 2
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error UYVY - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                # UYVY está en formato packed (2 bytes por píxel)
-                uyvy = data.reshape((height, width * 2))
-                image = cv2.cvtColor(uyvy, cv2.COLOR_YUV2BGR_UYVY)
-                
-            elif color_format == OBFormat.MJPG:
-                # MJPEG está comprimido, usar decodificador JPEG
-                image = cv2.imdecode(data, cv2.IMREAD_COLOR)
-                if image is None:
-                    print(f"Cámara {self.camera_id}: Error MJPEG - No se pudo decodificar")
-                    return None
-                    
+                image = np.reshape(data, (height, width, 3))
             else:
-                print(f"Cámara {self.camera_id}: Formato desconocido: {color_format}")
-                # Intentar conversión genérica como último recurso
-                if data.size == height * width * 3:
-                    print(f"Cámara {self.camera_id}: Intentando RGB genérico...")
-                    image = data.reshape((height, width, 3))
-                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                elif data.size == height * width * 2:
-                    print(f"Cámara {self.camera_id}: Intentando YUYV genérico...")
-                    yuyv = data.reshape((height, width * 2))
-                    image = cv2.cvtColor(yuyv, cv2.COLOR_YUV2BGR_YUYV)
-                else:
-                    print(f"Cámara {self.camera_id}: No se puede inferir formato - data.size={data.size}")
-                    return None
-            
-            # Verificar que la imagen resultante es válida
-            if image is None or image.size == 0:
-                print(f"Cámara {self.camera_id}: Imagen resultante vacía")
+                print(f"Formato de color no soportado: {color_format}")
                 return None
-            
-            # Debug final solo en caso de problema
-            if image.mean() < 10:  # Imagen muy oscura
-                print(f"Cámara {self.camera_id}: ⚠️ Imagen muy oscura - shape={image.shape}, min={image.min()}, max={image.max()}, mean={image.mean():.1f}")
-            elif not hasattr(self, '_success_logged'):
-                print(f"Cámara {self.camera_id}: ✅ Conversión exitosa - shape={image.shape}, mean={image.mean():.1f}")
-                self._success_logged = True
-            
+                
             return image
             
         except Exception as e:
-            print(f"Cámara {self.camera_id}: Error convirtiendo frame: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error convirtiendo frame: {e}")
             return None
     
     def get_frame(self) -> Optional[np.ndarray]:
@@ -210,66 +119,35 @@ class OrbbecCamera:
             print(f"Cámara {self.camera_id}: Pipeline no inicializado")
             return None
             
-        # Intentar obtener frame con reintentos
-        max_retries = 3
-        for retry in range(max_retries):
-            try:
-                if retry == 0:
-                    print(f"Cámara {self.camera_id}: Intentando obtener frames...")
-                else:
-                    print(f"Cámara {self.camera_id}: Reintento {retry}...")
+        try:
+            print(f"Cámara {self.camera_id}: Intentando obtener frames...")
+            # Obtener frames con timeout más largo
+            frames = self.pipeline.wait_for_frames(1000)  # Aumentar timeout
+            if not frames:
+                print(f"Cámara {self.camera_id}: wait_for_frames devolvió None")
+                return None
                 
-                # Obtener frames con timeout
-                frames = self.pipeline.wait_for_frames(1000)  # 1 segundo timeout
-                if not frames:
-                    print(f"Cámara {self.camera_id}: wait_for_frames devolvió None (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)  # Esperar un poco antes del siguiente intento
-                        continue
-                    return None
-                    
-                print(f"Cámara {self.camera_id}: Frames obtenidos, buscando color frame...")
-                color_frame = frames.get_color_frame()
-                if not color_frame:
-                    print(f"Cámara {self.camera_id}: No se pudo obtener color frame (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)
-                        continue
-                    return None
-                
-                print(f"Cámara {self.camera_id}: Color frame obtenido, convirtiendo...")
-                # Solo log formato en primera captura para evitar spam
-                if not hasattr(self, '_format_logged'):
-                    color_format = color_frame.get_format()
-                    print(f"Cámara {self.camera_id}: Formato detectado: {color_format}")
-                    self._format_logged = True
-                
-                # Convertir a formato OpenCV (BGR)
-                result = self._frame_to_bgr_image(color_frame)
-                if result is not None:
-                    if retry == 0:
-                        print(f"Cámara {self.camera_id}: Frame convertido exitosamente")
-                    else:
-                        print(f"Cámara {self.camera_id}: Frame convertido exitosamente después de {retry + 1} intentos")
-                    return result
-                else:
-                    print(f"Cámara {self.camera_id}: Error en conversión de frame (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)
-                        continue
-                
-            except Exception as e:
-                print(f"Cámara {self.camera_id}: Error obteniendo frame (intento {retry + 1}): {e}")
-                if retry < max_retries - 1:
-                    time.sleep(0.1)
-                    continue
-                else:
-                    import traceback
-                    traceback.print_exc()
-                    return None
-        
-        print(f"Cámara {self.camera_id}: No se pudo obtener frame después de {max_retries} intentos")
-        return None
+            print(f"Cámara {self.camera_id}: Frames obtenidos, buscando color frame...")
+            color_frame = frames.get_color_frame()
+
+            if not color_frame:
+                print(f"Cámara {self.camera_id}: No se pudo obtener color frame")
+                return None
+            
+            print(f"Cámara {self.camera_id}: Color frame obtenido, convirtiendo...")
+            # Convertir a formato OpenCV (BGR)
+            result = self._frame_to_bgr_image(color_frame)
+            if result is not None:
+                print(f"Cámara {self.camera_id}: Frame convertido exitosamente")
+            else:
+                print(f"Cámara {self.camera_id}: Error en conversión de frame")
+            return result
+            
+        except Exception as e:
+            print(f"Error obteniendo frame de cámara {self.camera_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def get_real_fps(self) -> int: # Se emplea en _create_new_writers en video_processor.py
         """Obtener el FPS real del perfil de la cámara"""
@@ -376,10 +254,10 @@ class CameraManager:
         """Obtener frame de una cámara específica"""
         if camera_id not in self.cameras:
             return None
-        
+
         return self.cameras[camera_id].get_frame()
-    
-    def start_recording_all(self, session_id: Optional[str] = None, patient_id: Optional[str] = None) -> bool:
+
+    def start_recording_all(self) -> bool:
         """Iniciar modo de grabación en todas las cámaras"""
         if self.recording_active:
             print("Ya hay una grabación en curso")
@@ -390,10 +268,6 @@ class CameraManager:
             return False
         
         try:
-            # Log información de sesión si se proporciona
-            if session_id or patient_id:
-                print(f"Iniciando grabación para sesión: {session_id}, paciente: {patient_id}")
-            
             success_count = 0
             for camera_id, camera in self.cameras.items():
                 if camera.start_recording():

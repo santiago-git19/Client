@@ -19,12 +19,16 @@ def test_camera_frames():
     print("="*50)
     
     try:
-        from camera_manager.camera_manager import CameraManager
+        from backend.camera_manager.camera_manager import CameraManager
+        from backend.config.settings import CameraConfig
         
         print("✅ CameraManager importado correctamente")
         
+        # Crear una instancia de CameraManager
+        camera_manager = CameraManager()
+        
         # Descubrir cámaras
-        available_cameras = CameraManager.discover_cameras()
+        available_cameras = camera_manager.discover_cameras()
         print(f"Cámaras encontradas: {len(available_cameras)}")
         
         if not available_cameras:
@@ -33,10 +37,12 @@ def test_camera_frames():
         
         # Usar primera cámara
         camera_id = 0
-        camera = CameraManager(camera_id)
+        
+        # Crear configuración para la cámara
+        config = CameraConfig(camera_id=camera_id, resolution_width=640, resolution_height=480, fps=30)
         
         print(f"Inicializando cámara {camera_id}...")
-        if not camera.initialize():
+        if not camera_manager.initialize_camera(camera_id, config):
             print(f"❌ No se pudo inicializar cámara {camera_id}")
             return
             
@@ -48,7 +54,7 @@ def test_camera_frames():
         
         for i in range(10):
             print(f"\n--- Frame {i+1} ---")
-            frame = camera.get_frame()
+            frame = camera_manager.get_frame(camera_id)
             
             if frame is not None:
                 print(f"✅ Frame capturado: {frame.shape}, dtype={frame.dtype}")
@@ -56,20 +62,20 @@ def test_camera_frames():
                 
                 # Verificar si no es gris (valores muy bajos)
                 if frame.mean() < 10:
-                    print(f"⚠️  Frame muy oscuro (posible problema de conversión)")
+                    print("⚠️  Frame muy oscuro (posible problema de conversión)")
                 else:
-                    print(f"✅ Frame parece válido")
+                    print("✅ Frame parece válido")
                 
                 # Guardar primer frame válido para inspección
                 if successful_captures == 0:
                     cv2.imwrite("test_frame.jpg", frame)
-                    print(f"   Frame guardado como test_frame.jpg")
+                    print("   Frame guardado como test_frame.jpg")
                 
                 successful_captures += 1
             else:
                 print(f"❌ Frame {i+1} falló")
                 
-        print(f"\n--- Resumen ---")
+        print("\n--- Resumen ---")
         print(f"Frames exitosos: {successful_captures}/10")
         
         if successful_captures > 5:
@@ -80,7 +86,7 @@ def test_camera_frames():
             print("❌ Conversión fallando completamente")
         
         # Cleanup
-        camera.cleanup()
+        camera_manager.cleanup()
         
     except Exception as e:
         print(f"❌ Error durante la prueba: {e}")

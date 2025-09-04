@@ -39,9 +39,10 @@ def create_app() -> Flask:
         try:
             url = f"{SystemConfig.SERVER.base_url}{SystemConfig.SERVER.upload_endpoint}" 
             
-            # Preparar datos del chunk
+            # Preparar archivos del chunk
             files = {
-                'file': open(chunk.file_path, 'rb')  # Server espera 'file'
+                'file_color': open(chunk.color_file_path, 'rb'),
+                'file_depth': open(chunk.depth_file_path, 'rb')
             }
             
             data = {
@@ -52,18 +53,20 @@ def create_app() -> Flask:
                 'chunk_number': chunk.sequence_number,  # Server espera chunk_number
                 'duration_seconds': chunk.duration_seconds,
                 'timestamp': chunk.timestamp.isoformat(),
-                'file_size_bytes': chunk.file_size_bytes
+                'color_file_size_bytes': chunk.color_file_size_bytes,
+                'depth_file_size_bytes': chunk.depth_file_size_bytes
             }
             
             response = requests.post(url, files=files, data=data, timeout=30)
             
             if response.status_code == 200:
                 print(f"Chunk enviado exitosamente: {chunk.chunk_id}")
-                # Eliminar archivo local después del envío exitoso
+                # Eliminar archivos locales después del envío exitoso
                 try:
-                    os.remove(chunk.file_path)
+                    os.remove(chunk.color_file_path)
+                    os.remove(chunk.depth_file_path)
                 except Exception as e:
-                    print(f"Error eliminando archivo local: {e}")
+                    print(f"Error eliminando archivos locales: {e}")
             elif response.status_code == 500:
                 # Verificar si es un error de fallo de cámaras
                 try:
