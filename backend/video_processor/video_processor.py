@@ -5,7 +5,7 @@ import cv2
 import uuid
 import numpy as np
 from datetime import datetime
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Union
 from dataclasses import dataclass
 
 from ..config.settings import SystemConfig
@@ -21,11 +21,15 @@ class VideoChunk:
     patient_id: str
     sequence_number: int
     color_file_path: str
-    depth_file_path: str
     duration_seconds: float
     timestamp: datetime
     color_file_size_bytes: int
-    depth_file_size_bytes: int
+    # Campos opcionales para compatibilidad con VideoWriter
+    depth_file_path: Optional[str] = None
+    depth_file_size_bytes: Optional[int] = None
+    # Para compatibilidad con VideoWriter (que solo tiene un archivo)
+    file_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
 
 
 class VideoWriter:
@@ -99,9 +103,12 @@ class VideoWriter:
                 session_id="",  # Se asignará externamente
                 patient_id="",  # Se asignará externamente
                 sequence_number=0,  # Se asignará externamente
-                file_path=self.output_path,
+                color_file_path=self.output_path,  # VideoWriter solo maneja color
                 duration_seconds=duration,
                 timestamp=self.start_time or datetime.now(),
+                color_file_size_bytes=file_size,
+                # Para compatibilidad hacia atrás
+                file_path=self.output_path,
                 file_size_bytes=file_size
             )
             
@@ -236,11 +243,12 @@ class VideoDepthWriter:
 class VideoProcessor:
     """Procesador principal de video multi-cámara con color y profundidad"""
     
-    def __init__(self):
+    def __init__(self, use_depth: bool = True):
         self.recording_active = False
         self.session_id: Optional[str] = None
         self.patient_id: Optional[str] = None
-        self.current_writers: Dict[int, VideoDepthWriter] = {}
+        self.use_depth = use_depth  # Determina si usar VideoDepthWriter o VideoWriter
+        self.current_writers: Dict[int, Union[VideoWriter, VideoDepthWriter]] = {}
         self.chunk_sequence: Dict[int, int] = {}  # Indica, para cada cámara (identificada por el índice del diccionario), el número de secuencia del chunk que se está grabando
         self.recording_thread: Optional[threading.Thread] = None
         self.upload_callbacks: List[Callable[[VideoChunk], None]] = []
@@ -327,10 +335,35 @@ class VideoProcessor:
                     frames_written_this_cycle = 0
                     
                     for camera_id in list(self.current_writers.keys()):
-                        frame = camera_manager.get_frame(camera_id)
-                        if frame is not None and camera_id in self.current_writers:
-                            if self.current_writers[camera_id].write_frame(frame):
-                                frames_written_this_cycle += 1
+                        writer = self.current_writers[camera_id]
+                        
+                        # Verificar qué tipo de writer es
+                        if isinstance(writer, VideoDepthWriter):
+                            # Para VideoDepthWriter necesitamos color y profundidad
+                            color_frame = camera_manager.get_frame(camera_id)
+                            depth_frame = camera_manager.get_depth_frame(camera_id)
+                            
+                            if color_frame is not None and depth_frame is not None and camera_id in self.current_writers:
+                                if writer.write_frames(color_frame, depth_frame):
+                                    frames_written_this_cycle += 1
+                            elif color_frame is None or depth_frame is None:
+                                if frames_captured % 30 == 0:  # Log cada segundo aproximadamente
+                                    missing = []
+                                    if color_frame is None:
+                                        missing.append("color")
+                                    if depth_frame is None:
+                                        missing.append("depth")
+                                    print(f"Cámara {camera_id}: No se pudo obtener frame de {'/'.join(missing)}")
+                        
+                        elif isinstance(writer, VideoWriter):
+                            # Para VideoWriter solo necesitamos el frame de color
+                            color_frame = camera_manager.get_frame(camera_id)
+                            if color_frame is not None and camera_id in self.current_writers:
+                                if writer.write_frame(color_frame):
+                                    frames_written_this_cycle += 1
+                        
+                        else:
+                            print(f"Tipo de writer desconocido para cámara {camera_id}: {type(writer)}")
                     
                     if frames_written_this_cycle == 0:
                         break  # No hay más frames disponibles
@@ -373,13 +406,29 @@ class VideoProcessor:
         # Cerrar writers y eliminar archivos
         for camera_id, writer in self.current_writers.items():
             try:
-                if writer.writer:
-                    writer.writer.release()
-                if os.path.exists(writer.output_path):
-                    os.remove(writer.output_path)
-                    print(f"Archivo eliminado: {writer.output_path}")
+                if isinstance(writer, VideoDepthWriter):
+                    # Para VideoDepthWriter
+                    if writer.color_writer:
+                        writer.color_writer.release()
+                    
+                    # Eliminar archivos de color y profundidad
+                    if os.path.exists(writer.color_path):
+                        os.remove(writer.color_path)
+                        print(f"Archivo de color eliminado: {writer.color_path}")
+                    if os.path.exists(writer.depth_path):
+                        os.remove(writer.depth_path)
+                        print(f"Archivo de profundidad eliminado: {writer.depth_path}")
+                        
+                elif isinstance(writer, VideoWriter):
+                    # Para VideoWriter
+                    if writer.writer:
+                        writer.writer.release()
+                    if os.path.exists(writer.output_path):
+                        os.remove(writer.output_path)
+                        print(f"Archivo eliminado: {writer.output_path}")
+                        
             except Exception as e:
-                print(f"Error eliminando archivo de cámara {camera_id}: {e}")
+                print(f"Error eliminando archivos de cámara {camera_id}: {e}")
         
         self.current_writers.clear()
         camera_manager.stop_recording_all()
@@ -410,21 +459,40 @@ class VideoProcessor:
                     # Capturar frames de todas las cámaras (sincronización por software)
                     
                     for camera_id in camera_manager.cameras:
-                        # Obtener tanto frame de color como de profundidad
-                        color_frame = camera_manager.get_frame(camera_id)
-                        depth_frame = camera_manager.get_depth_frame(camera_id)
+                        if camera_id not in self.current_writers:
+                            continue
+                            
+                        writer = self.current_writers[camera_id]
                         
-                        if color_frame is not None and depth_frame is not None and camera_id in self.current_writers:
-                            if self.current_writers[camera_id].write_frames(color_frame, depth_frame):
-                                frames_written[camera_id] += 1
-                        elif color_frame is None or depth_frame is None:
-                            if frame_count % 30 == 0:  # Log cada segundo aproximadamente
+                        if isinstance(writer, VideoDepthWriter):
+                            # Para VideoDepthWriter necesitamos color y profundidad
+                            color_frame = camera_manager.get_frame(camera_id)
+                            depth_frame = camera_manager.get_depth_frame(camera_id)
+                            
+                            if color_frame is not None and depth_frame is not None:
+                                if writer.write_frames(color_frame, depth_frame):
+                                    frames_written[camera_id] += 1
+                            elif frame_count % 30 == 0:  # Log cada segundo aproximadamente
                                 missing = []
                                 if color_frame is None:
                                     missing.append("color")
                                 if depth_frame is None:
                                     missing.append("depth")
                                 print(f"Cámara {camera_id}: No se pudo obtener frame de {'/'.join(missing)}")
+                                
+                        elif isinstance(writer, VideoWriter):
+                            # Para VideoWriter solo necesitamos color
+                            color_frame = camera_manager.get_frame(camera_id)
+                            
+                            if color_frame is not None:
+                                if writer.write_frame(color_frame):
+                                    frames_written[camera_id] += 1
+                            elif frame_count % 30 == 0:
+                                print(f"Cámara {camera_id}: No se pudo obtener frame de color")
+                                
+                        else:
+                            if frame_count % 30 == 0:
+                                print(f"Tipo de writer desconocido para cámara {camera_id}: {type(writer)}")
 
                     frame_count += 1
                 
@@ -458,9 +526,6 @@ class VideoProcessor:
                 
                 # Crear directorio para esta cámara
                 camera_dir = os.path.join(SystemConfig.TEMP_VIDEO_DIR, f"camera{camera_id}")
-                print(f"Generando chunk para cámara {camera_id}: {chunk_id}")
-                
-                writer = VideoDepthWriter(camera_id, camera_dir, chunk_id, self.config)
                 
                 # Obtener un frame para determinar dimensiones
                 frame = camera_manager.get_frame(camera_id)
@@ -468,13 +533,27 @@ class VideoProcessor:
                     height, width = frame.shape[:2]
                     # Obtener FPS real de la cámara
                     fps = camera_manager.cameras[camera_id].get_real_fps()
-                    print(f"Inicializando writer para cámara {camera_id}: {width}x{height}@{fps}fps (FPS real)")
+                    
+                    if self.use_depth:
+                        # Crear VideoDepthWriter para color + profundidad
+                        print(f"Generando VideoDepthWriter para cámara {camera_id}: {chunk_id}")
+                        writer = VideoDepthWriter(camera_id, camera_dir, chunk_id, self.config)
+                        writer_type = "VideoDepthWriter"
+                    else:
+                        # Crear VideoWriter para solo color
+                        print(f"Generando VideoWriter para cámara {camera_id}: {chunk_id}")
+                        output_path = os.path.join(camera_dir, f"{chunk_id}.mp4")
+                        os.makedirs(camera_dir, exist_ok=True)
+                        writer = VideoWriter(camera_id, output_path, self.config)
+                        writer_type = "VideoWriter"
+                    
+                    print(f"Inicializando {writer_type} para cámara {camera_id}: {width}x{height}@{fps}fps")
                     
                     if writer.initialize(width, height, fps):
                         self.current_writers[camera_id] = writer
-                        print(f"VideoDepthWriter creado exitosamente para cámara {camera_id}")
+                        print(f"{writer_type} creado exitosamente para cámara {camera_id}")
                     else:
-                        print(f"Error inicializando VideoDepthWriter para cámara {camera_id}")
+                        print(f"Error inicializando {writer_type} para cámara {camera_id}")
                 else:
                     print(f"No se pudo obtener frame de prueba para cámara {camera_id}")
         
@@ -495,8 +574,12 @@ class VideoProcessor:
         for chunk in chunks_to_upload:
             threading.Thread(target=self._upload_chunk, args=(chunk,), daemon=True).start()
     
-    def _finalize_writer(self, camera_id: int, writer: VideoDepthWriter) -> Optional[VideoChunk]:
-        """Finalizar un writer específico"""
+    def _finalize_writer(self, camera_id: int, writer) -> Optional[VideoChunk]:
+        """Finalizar un writer específico (compatible con VideoWriter y VideoDepthWriter)"""
+        if not isinstance(writer, (VideoWriter, VideoDepthWriter)):
+            print(f"Tipo de writer no soportado para cámara {camera_id}: {type(writer)}")
+            return None
+            
         chunk = writer.finalize()
         if chunk:
             chunk.session_id = self.session_id
@@ -591,5 +674,16 @@ class VideoProcessor:
             return False
 
 
-# Singleton del procesador de video
-video_processor = VideoProcessor()
+# Función factory para crear procesadores configurables
+def create_video_processor(use_depth: bool = True) -> VideoProcessor:
+    """
+    Crear una instancia del procesador de video
+    
+    Args:
+        use_depth: Si True, usa VideoDepthWriter (color + profundidad)
+                   Si False, usa VideoWriter (solo color)
+    """
+    return VideoProcessor(use_depth=use_depth)
+
+# Singleton del procesador de video con profundidad habilitada por defecto
+video_processor = VideoProcessor(use_depth=True)

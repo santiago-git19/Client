@@ -39,12 +39,31 @@ def create_app() -> Flask:
         try:
             url = f"{SystemConfig.SERVER.base_url}{SystemConfig.SERVER.upload_endpoint}" 
             
-            # Preparar archivos del chunk
-            files = {
-                'file_color': open(chunk.color_file_path, 'rb'),
-                'file_depth': open(chunk.depth_file_path, 'rb')
-            }
-            print(chunk.color_file_path, chunk.depth_file_path)
+            # Preparar archivos del chunk - compatible con VideoWriter y VideoDepthWriter
+            files = {}
+            files_to_cleanup = []
+            
+            # Archivo de color (siempre presente)
+            if chunk.color_file_path and os.path.exists(chunk.color_file_path):
+                files['file_color'] = open(chunk.color_file_path, 'rb')
+                files_to_cleanup.append(chunk.color_file_path)
+                print(f"Color file: {chunk.color_file_path}")
+            elif chunk.file_path and os.path.exists(chunk.file_path):
+                # Compatibilidad con VideoWriter (solo un archivo)
+                files['file_color'] = open(chunk.file_path, 'rb')
+                files_to_cleanup.append(chunk.file_path)
+                print(f"Video file (color): {chunk.file_path}")
+            
+            # Archivo de profundidad (opcional - solo con VideoDepthWriter)
+            if chunk.depth_file_path and os.path.exists(chunk.depth_file_path):
+                files['file_depth'] = open(chunk.depth_file_path, 'rb')
+                files_to_cleanup.append(chunk.depth_file_path)
+                print(f"Depth file: {chunk.depth_file_path}")
+            
+            if not files:
+                print(f"No hay archivos válidos para enviar en chunk {chunk.chunk_id}")
+                return
+            
             data = {
                 'chunk_id': chunk.chunk_id,
                 'camera_id': chunk.camera_id,
@@ -53,8 +72,9 @@ def create_app() -> Flask:
                 'chunk_number': chunk.sequence_number,  # Server espera chunk_number
                 'duration_seconds': chunk.duration_seconds,
                 'timestamp': chunk.timestamp.isoformat(),
-                'color_file_size_bytes': chunk.color_file_size_bytes,
-                'depth_file_size_bytes': chunk.depth_file_size_bytes
+                'color_file_size_bytes': chunk.color_file_size_bytes or chunk.file_size_bytes or 0,
+                'depth_file_size_bytes': chunk.depth_file_size_bytes or 0,
+                'has_depth': chunk.depth_file_path is not None  # Indicar si tiene profundidad
             }
             
             response = requests.post(url, files=files, data=data, timeout=30)
@@ -63,8 +83,10 @@ def create_app() -> Flask:
                 print(f"Chunk enviado exitosamente: {chunk.chunk_id}")
                 # Eliminar archivos locales después del envío exitoso
                 try:
-                    os.remove(chunk.color_file_path)
-                    os.remove(chunk.depth_file_path)
+                    for file_path in files_to_cleanup:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"Archivo eliminado: {file_path}")
                 except Exception as e:
                     print(f"Error eliminando archivos locales: {e}")
             elif response.status_code == 500:
@@ -99,11 +121,12 @@ def create_app() -> Flask:
         except Exception as e:
             print(f"Error en upload_chunk_to_server: {e}")
         finally:
-            # Cerrar archivo
-            try:
-                files['file'].close()
-            except:
-                pass
+            # Cerrar todos los archivos abiertos
+            for file_obj in files.values():
+                try:
+                    file_obj.close()
+                except Exception:
+                    pass
     
     # Registrar callback
     video_processor.add_upload_callback(upload_chunk_to_server)
