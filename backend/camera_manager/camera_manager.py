@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 from datetime import datetime
 from typing import List, Dict, Optional
-import time
 from dataclasses import dataclass
 
 # Importación del SDK de Orbbec
@@ -111,110 +110,21 @@ class OrbbecCamera:
             width = frame.get_width()
             height = frame.get_height()
             color_format = frame.get_format()
-            
-            # Obtener los datos como un array de bytes
-            data = np.asanyarray(frame.get_data(), dtype=np.uint8)
-            
-            # Debug inicial solo para primera conversión por cámara
-            if not hasattr(self, '_debug_logged'):
-                print(f"Cámara {self.camera_id}: Conversión - {width}x{height}, fmt={color_format}, data={data.shape}, min={data.min()}, max={data.max()}, mean={data.mean():.1f}")
-                self._debug_logged = True
+            data = np.asanyarray(frame.get_data())
             
             if color_format == OBFormat.RGB:
-                expected_size = height * width * 3
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error RGB - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                image = data.reshape((height, width, 3))
+                image = np.reshape(data, (height, width, 3))
                 image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                
             elif color_format == OBFormat.BGR:
-                expected_size = height * width * 3
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error BGR - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                image = data.reshape((height, width, 3))
-                
-            elif color_format == OBFormat.YUYV:
-                expected_size = height * width * 2
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error YUYV - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                # YUYV: Y0 U0 Y1 V0 (4 bytes para 2 píxeles)
-                # Reshape como array 2D para OpenCV
-                yuyv_2d = data.reshape((height, width * 2))
-                # Intentar diferentes variantes de conversión YUYV
-                try:
-                    image = cv2.cvtColor(yuyv_2d, cv2.COLOR_YUV2BGR_YUY2)
-                except:
-                    try:
-                        image = cv2.cvtColor(yuyv_2d, cv2.COLOR_YUV2BGR_YUYV)
-                    except:
-                        # Conversión manual como último recurso
-                        print(f"Cámara {self.camera_id}: Usando conversión manual YUYV")
-                        y = data[0::2]  # Componente Y (luminancia)
-                        u = data[1::4]  # Componente U
-                        v = data[3::4]  # Componente V
-                        # Expandir U y V para cada píxel
-                        u_expanded = np.repeat(u, 2)
-                        v_expanded = np.repeat(v, 2)
-                        # Crear imagen YUV planar
-                        yuv = np.zeros((height * width * 3,), dtype=np.uint8)
-                        yuv[0::3] = y
-                        yuv[1::3] = u_expanded[:len(y)]
-                        yuv[2::3] = v_expanded[:len(y)]
-                        yuv_image = yuv.reshape((height, width, 3))
-                        image = cv2.cvtColor(yuv_image, cv2.COLOR_YUV2BGR)
-                
-            elif color_format == OBFormat.UYVY:
-                expected_size = height * width * 2
-                if data.size != expected_size:
-                    print(f"Cámara {self.camera_id}: Error UYVY - Esperado: {expected_size}, Actual: {data.size}")
-                    return None
-                # UYVY está en formato packed (2 bytes por píxel)
-                uyvy = data.reshape((height, width * 2))
-                image = cv2.cvtColor(uyvy, cv2.COLOR_YUV2BGR_UYVY)
-                
-            elif color_format == OBFormat.MJPG:
-                # MJPEG está comprimido, usar decodificador JPEG
-                image = cv2.imdecode(data, cv2.IMREAD_COLOR)
-                if image is None:
-                    print(f"Cámara {self.camera_id}: Error MJPEG - No se pudo decodificar")
-                    return None
-                    
+                image = np.reshape(data, (height, width, 3))
             else:
-                print(f"Cámara {self.camera_id}: Formato desconocido: {color_format}")
-                # Intentar conversión genérica como último recurso
-                if data.size == height * width * 3:
-                    print(f"Cámara {self.camera_id}: Intentando RGB genérico...")
-                    image = data.reshape((height, width, 3))
-                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                elif data.size == height * width * 2:
-                    print(f"Cámara {self.camera_id}: Intentando YUYV genérico...")
-                    yuyv = data.reshape((height, width * 2))
-                    image = cv2.cvtColor(yuyv, cv2.COLOR_YUV2BGR_YUYV)
-                else:
-                    print(f"Cámara {self.camera_id}: No se puede inferir formato - data.size={data.size}")
-                    return None
-            
-            # Verificar que la imagen resultante es válida
-            if image is None or image.size == 0:
-                print(f"Cámara {self.camera_id}: Imagen resultante vacía")
+                print(f"Formato de color no soportado: {color_format}")
                 return None
-            
-            # Debug final solo en caso de problema
-            if image.mean() < 10:  # Imagen muy oscura
-                print(f"Cámara {self.camera_id}: ⚠️ Imagen muy oscura - shape={image.shape}, min={image.min()}, max={image.max()}, mean={image.mean():.1f}")
-            elif not hasattr(self, '_success_logged'):
-                print(f"Cámara {self.camera_id}: ✅ Conversión exitosa - shape={image.shape}, mean={image.mean():.1f}")
-                self._success_logged = True
-            
+                
             return image
             
         except Exception as e:
-            print(f"Cámara {self.camera_id}: Error convirtiendo frame: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error convirtiendo frame: {e}")
             return None
     
     def get_frame(self) -> Optional[np.ndarray]:
