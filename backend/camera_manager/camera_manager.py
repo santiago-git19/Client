@@ -223,66 +223,34 @@ class OrbbecCamera:
             print(f"Cámara {self.camera_id}: Pipeline no inicializado")
             return None
             
-        # Intentar obtener frame con reintentos
-        max_retries = 3
-        for retry in range(max_retries):
-            try:
-                if retry == 0:
-                    print(f"Cámara {self.camera_id}: Intentando obtener frames...")
-                else:
-                    print(f"Cámara {self.camera_id}: Reintento {retry}...")
+        try:
+            #print(f"Cámara {self.camera_id}: Intentando obtener frames...")
+            # Obtener frames con timeout más largo
+            frames = self.pipeline.wait_for_frames(1000)  
+            if not frames:
+                print(f"Cámara {self.camera_id}: wait_for_frames devolvió None")
+                return None
                 
-                # Obtener frames con timeout
-                frames = self.pipeline.wait_for_frames(1000)  # 1 segundo timeout
-                if not frames:
-                    print(f"Cámara {self.camera_id}: wait_for_frames devolvió None (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)  # Esperar un poco antes del siguiente intento
-                        continue
-                    return None
-                    
-                print(f"Cámara {self.camera_id}: Frames obtenidos, buscando color frame...")
-                color_frame = frames.get_color_frame()
-                if not color_frame:
-                    print(f"Cámara {self.camera_id}: No se pudo obtener color frame (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)
-                        continue
-                    return None
+            #print(f"Cámara {self.camera_id}: Frames obtenidos, buscando color frame...")
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                print(f"Cámara {self.camera_id}: No se pudo obtener color frame")
+                return None
+            
+            #print(f"Cámara {self.camera_id}: Color frame obtenido, convirtiendo...")
+            # Convertir a formato OpenCV (BGR)
+            result = self._frame_to_bgr_image(color_frame)
+            if result is None:
+                print(f"Cámara {self.camera_id}: Error en conversión de frame")
+    
                 
-                print(f"Cámara {self.camera_id}: Color frame obtenido, convirtiendo...")
-                # Solo log formato en primera captura para evitar spam
-                if not hasattr(self, '_format_logged'):
-                    color_format = color_frame.get_format()
-                    print(f"Cámara {self.camera_id}: Formato detectado: {color_format}")
-                    self._format_logged = True
-                
-                # Convertir a formato OpenCV (BGR)
-                result = self._frame_to_bgr_image(color_frame)
-                if result is not None:
-                    if retry == 0:
-                        print(f"Cámara {self.camera_id}: Frame convertido exitosamente")
-                    else:
-                        print(f"Cámara {self.camera_id}: Frame convertido exitosamente después de {retry + 1} intentos")
-                    return result
-                else:
-                    print(f"Cámara {self.camera_id}: Error en conversión de frame (intento {retry + 1})")
-                    if retry < max_retries - 1:
-                        time.sleep(0.1)
-                        continue
-                
-            except Exception as e:
-                print(f"Cámara {self.camera_id}: Error obteniendo frame (intento {retry + 1}): {e}")
-                if retry < max_retries - 1:
-                    time.sleep(0.1)
-                    continue
-                else:
-                    import traceback
-                    traceback.print_exc()
-                    return None
-        
-        print(f"Cámara {self.camera_id}: No se pudo obtener frame después de {max_retries} intentos")
-        return None
+            return result
+            
+        except Exception as e:
+            print(f"Error obteniendo frame de cámara {self.camera_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def get_real_fps(self) -> int: # Se emplea en _create_new_writers en video_processor.py
         """Obtener el FPS real del perfil de la cámara"""
